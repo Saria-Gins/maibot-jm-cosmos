@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "github.saria-gins.maibot-jm-cosmos",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "name": "JM-Cosmos Metadata",
   "description": "JM 漫画元数据查询：搜索、详情、榜单、推荐。只读查询，不下载、不打包、不发送文件。移植自 GEMILUXVII 的 astrbot_plugin_jm_cosmos 查询部分。",
   "author": {
