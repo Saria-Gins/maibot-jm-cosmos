@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.5
+
+- 权限改为 fail-closed：新增 `_resolve_scope()` 判定 private / group / unknown，只有确认是私聊才放行，认不出来的会话一律拒绝并打 warning
+- 移除按 stream_id 猜群号的 `_resolve_group_id`，命令与 LLM 工具统一走 `_allowed()`
+- README 按 2.0.4 的真实行为重写：「插件能加载、查询会失败」；方案 1 明确说明需要自建桥接进程、本仓库未提供
+- `scripts/fix_common_conflict.py` 删除残留的 `rmtree`，预演文案与实际行为一致
+
 ## 2.0.4
 
 - `import jmcomic` 改为懒加载：`common` 包名冲突不再导致插件加载失败，首次调用时给出可读错误；`on_load` 增加依赖预检与 warning
