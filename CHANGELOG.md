@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.1
+
+- 删除 `scripts/fix_common_conflict.py`：桥接方案上线后它已无用，留着只会让人误改宿主 site-packages
+- 面向用户的错误统一为固定文案，站点 URL 与异常细节只写日志
+- 桥接调用改为线程池 + `subprocess.run(timeout=...)`，超时由 subprocess 终止子进程
+- 权限保持 fail-closed：`_resolve_scope()` 认不出会话类型时按拒绝处理
+
+
 ## 2.1.0
 
 - 内置查询桥接：新增 `scripts/jm_bridge.py`，jmcomic 在独立子进程运行，彻底绕开 `common` 与 `src/common` 的包名冲突；默认安装后即可查询，不需要改宿主 site-packages
