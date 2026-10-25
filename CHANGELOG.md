@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.1
+
+- 许可证统一为 AGPL-3.0-or-later，与仓库中的 AGPL-3.0 LICENSE 正文一致
+- `access.allow_groups` 默认改为 `false`，成人向标题不会直接进入群聊
+- 移除 `@Tool` 上无效的 `activation_type` 参数与 `ActivationType` 导入
+- Command 返回值第三项改为明确权重 `1`
+- 新增用户 ID 兜底：`kwargs.user_id` 缺失时从 `message.message_info.user_info` 读取
+- `plugin.enabled` 现在真实生效
+
+
 ## 2.0.0
 
 重构为**只读元数据查询**插件，以符合插件中心的收录范围：
