@@ -59,7 +59,7 @@ ImportError: cannot import name 'time_stamp' from 'common'
 `jmcomic` 在多处函数体内做懒加载，插件层无法绕过。可选方案：
 
 1. **推荐**：给 jmcomic 单独 venv，插件通过子进程调用
-2. 修改 site-packages（本仓库 `scripts/fix_common_conflict.py`）：**属于破坏性操作**，脚本默认只预演，`--apply` 才执行，且会先检查是否还有其它包引用 `common`、并自动备份
+2. 修改 site-packages（本仓库 `scripts/fix_common_conflict.py`，**可能影响你以为无关的包**，**强烈建议优先选方案 1**）：**属于破坏性操作**，脚本默认只预演；`--apply` 才执行，会先检查是否还有其它包引用 `common`（含 `from common.xxx` 子包写法），并且**只把原目录改名为备份、不删除**，可随时回滚
 
 升级或重装 jmcomic 后需要重新处理。
 
