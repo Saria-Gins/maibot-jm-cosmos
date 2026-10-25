@@ -7,10 +7,9 @@ JM 漫画**元数据查询**插件：搜索、详情、榜单、推荐。
 > **本版本只做只读查询：不下载、不打包、不发送任何文件。** 下载功能属于另一个独立版本，不在本仓库、也不在插件中心分发。
 
 > [!IMPORTANT]
-> **默认环境安装后，插件能加载，但查询会失败。**
-> `jmcomic` 依赖的顶层包 `common` 与 MaiBot 的 `src/common` 同名，导入时会抛 `ImportError: cannot import name 'time_stamp' from 'common'`。
-> 本插件把 `import jmcomic` 改成了懒加载，所以插件本身可以正常出现在列表里，发 `/jms` 时会收到一句可读的错误提示。
-> **要让查询真正可用，必须先按下面的「依赖冲突说明」处理依赖。**
+> 本插件依赖 `jmcomic`，请先在同一 Python 环境安装：`pip install "jmcomic>=2.6.10,<3"`。
+> 查询通过内置桥接进程执行，**不需要修改 site-packages**，装好依赖即可用。
+
 
 ## 功能
 
@@ -54,27 +53,30 @@ pip install "jmcomic>=2.6.10,<3"
 
 **默认只在私聊可用**：站点条目以成人向为主，返回到群聊会造成不必要的影响。需要群聊的部署者请自行开启 `allow_groups` 并确认适用范围与合规责任。
 
-## ⚠️ 依赖冲突说明
+## 依赖冲突是怎么处理的
 
-> 这一步没做的话，插件能加载但所有查询都会失败，并提示 common 包名冲突。
-
-`jmcomic` 依赖一个**顶层包 `common`**，而 MaiBot 自己也有 `src/common`。插件运行时 `src` 在 `sys.path` 里，`import common` 会解析到 MaiBot 的实现，报错：
+`jmcomic` 依赖一个**顶层包 `common`**，而 MaiBot 自己也有 `src/common`。直接在插件进程里 `import jmcomic`，`import common` 会解析到 MaiBot 的实现，抛：
 
 ```
 ImportError: cannot import name 'time_stamp' from 'common'
 ```
 
-`jmcomic` 在多处函数体内做懒加载，本插件把顶层 `import jmcomic` 推迟到首次调用，作用只是让插件能加载、错误更可读，**并不能绕过名字冲突**。要真正查到数据，必须选下面两种方案之一：
+**本插件的做法：把 jmcomic 放进独立子进程。** 仓库内置 `scripts/jm_bridge.py`，插件每次查询时用 `sys.executable` 启动它，通过 stdin/stdout 传 JSON：
 
-1. **推荐**：把 jmcomic 装进独立 venv，自己写一个桥接进程（HTTP / CLI）让本插件调用。**本仓库未附桥接代码**，需要自行实现
-2. 修改 site-packages（本仓库 `scripts/fix_common_conflict.py`）：**会动宿主环境，脚本本身不在插件加载路径里，需要你手动执行**。默认只预演；`--apply` 才动手，会先检查是否还有其它包引用 `common`（含 `from common.xxx` 子包写法），并且**只把原目录改名为备份、不删除**。该检查基于文本扫描，覆盖不到 entry points / importlib 动态导入 / 非 .py 文件，所以执行前请人工确认
+- 子进程的 `sys.path[0]` 是 `scripts/` 目录，不含 MaiBot 的 `src`，所以 `common` 能正确解析到 site-packages
+- 启动子进程时清掉继承来的 `PYTHONPATH`，避免宿主注入路径污染
+- 桥接脚本固定路径、`shell=False`、不拼接 shell 命令，参数以 JSON 传入
+- 返回内容先做 JSON 解析校验，格式不符会明确报错
 
-升级或重装 jmcomic 后需要重新处理。
+因此**默认安装后查询就是可用的**，不需要动宿主环境，也不需要自己写桥接。
+
+> 仓库里还留着早期的 `scripts/fix_common_conflict.py`（改 site-packages 的方案），现在**不再需要**，仅作历史参考；它不在插件加载路径里，也不会自动执行。
 
 ## 实现说明
 
 - 所有网络访问只经 `jmcomic` 请求 JM 站点，不涉及聊天记录、用户 ID、群号或插件配置
 - 阻塞调用放在线程池里并带超时，不阻塞事件循环
+- 查询走内置桥接子进程（`scripts/jm_bridge.py`），jmcomic 不与 MaiBot 共享进程
 - 输出只包含标题、编号、页数、作者、标签等元数据
 
 ## 已知限制
