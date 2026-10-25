@@ -180,56 +180,64 @@ class JMMetaPlugin(MaiBotPlugin):
         return ""
 
     @staticmethod
-    def _looks_like_group(stream_id: str, kwargs: Dict[str, Any]) -> bool:
-        """判断当前会话是否像群聊：有 group_info，或 stream_id 带 group 标记。"""
+    def _resolve_scope(stream_id: str, kwargs: Dict[str, Any]) -> Tuple[str, str]:
+        """判定会话类型，返回 (scope, group_id)。
 
+        scope 取值：group / private / unknown。
+        只有能确认是私聊时才返回 private；其余一律 unknown，由权限层拒绝。
+        """
+
+        info: Dict[str, Any] = {}
         message = kwargs.get("message")
         if isinstance(message, dict):
-            info = message.get("message_info") or {}
-            if isinstance(info, dict) and isinstance(info.get("group_info"), dict):
-                return True
-        return bool(re.search(r"(?:group|群)", str(stream_id or "")))
+            candidate = message.get("message_info")
+            if isinstance(candidate, dict):
+                info = candidate
 
-    def _check_permission(self, user_id: str, group_id: str = "", is_group: bool = False) -> bool:
-        """用户白名单 + 群聊开关 + 群白名单；群号解析不出来时按群聊拒绝。"""
+        group_info = info.get("group_info")
+        if isinstance(group_info, dict):
+            value = str(group_info.get("group_id") or "").strip()
+            return ("group", value) if value.isdigit() else ("unknown", "")
 
-        allowed_users = [str(x).strip() for x in self.config.access.allowed_users if str(x).strip()]
-        if allowed_users and str(user_id).strip() not in allowed_users:
-            return False
-        group = str(group_id or "").strip()
-        if not group:
-            if is_group:
-                # 看起来是群聊却拿不到群号：不能当成私聊放过
-                self.ctx.logger.warning("[JM] 群号解析失败，按群聊拒绝本次调用")
-                return False
-            return True
-        if not self.config.access.allow_groups:
-            return False
-        allowed_groups = [str(x).strip() for x in self.config.access.allowed_groups if str(x).strip()]
-        if allowed_groups and group not in allowed_groups:
-            return False
-        return True
-
-    @staticmethod
-    def _resolve_group_id(stream_id: str, kwargs: Dict[str, Any]) -> str:
-        """从 kwargs 或 stream_id 解析群号；私聊返回空串。"""
+        if isinstance(info.get("user_info"), dict):
+            return "private", ""
 
         for key in ("group_id", "group", "gid"):
             value = str(kwargs.get(key) or "").strip()
             if value.isdigit():
-                return value
-        message = kwargs.get("message")
-        if isinstance(message, dict):
-            info = message.get("message_info") or {}
-            if isinstance(info, dict):
-                group_info = info.get("group_info") or {}
-                if isinstance(group_info, dict):
-                    value = str(group_info.get("group_id") or "").strip()
-                    if value.isdigit():
-                        return value
-        matched = re.search(r"(?:group|群)[:：_\-]?(\d{5,})", str(stream_id or ""))
-        return matched.group(1) if matched else ""
+                return "group", value
 
+        raw = str(stream_id or "")
+        matched = re.search(r"(?:group|群)[:：_\-]?(\d{5,})", raw)
+        if matched:
+            return "group", matched.group(1)
+        if re.search(r"(?:private|friend|私聊|好友)", raw, re.I):
+            return "private", ""
+        return "unknown", ""
+
+    def _check_permission(self, user_id: str, scope: str = "unknown", group_id: str = "") -> bool:
+        """用户白名单 + 会话类型 + 群白名单；无法确认会话类型时拒绝。"""
+
+        allowed_users = [str(x).strip() for x in self.config.access.allowed_users if str(x).strip()]
+        if allowed_users and str(user_id).strip() not in allowed_users:
+            return False
+
+        if scope == "unknown":
+            self.ctx.logger.warning("[JM] 无法确认会话类型，按群聊策略拒绝本次调用")
+            return False
+        if scope == "private":
+            return True
+        if not self.config.access.allow_groups:
+            return False
+        allowed_groups = [str(x).strip() for x in self.config.access.allowed_groups if str(x).strip()]
+        return not (allowed_groups and str(group_id).strip() not in allowed_groups)
+
+    def _allowed(self, stream_id: str, user_id: str, kwargs: Dict[str, Any]) -> bool:
+        """命令与工具共用的权限入口。"""
+
+        user = user_id or self._resolve_user_id(kwargs)
+        scope, group_id = self._resolve_scope(stream_id, kwargs)
+        return self._check_permission(user, scope, group_id)
 
     async def _run(self, func: Any, *args: Any) -> Any:
         """带超时地在线程池里执行阻塞查询。"""
@@ -246,7 +254,7 @@ class JMMetaPlugin(MaiBotPlugin):
         if not self.config.plugin.enabled:
             return True, "", 1
         user_id = user_id or self._resolve_user_id(kwargs)
-        if not self._check_permission(user_id, self._resolve_group_id(stream_id, kwargs), self._looks_like_group(stream_id, kwargs)):
+        if not self._allowed(stream_id, user_id, kwargs):
             await self.ctx.send.text("你没有使用 JM 查询的权限。", stream_id)
             return True, "", 1
         album_id = str((matched_groups or {}).get("album_id") or "").strip()
@@ -271,7 +279,7 @@ class JMMetaPlugin(MaiBotPlugin):
         if not self.config.plugin.enabled:
             return True, "", 1
         user_id = user_id or self._resolve_user_id(kwargs)
-        if not self._check_permission(user_id, self._resolve_group_id(stream_id, kwargs), self._looks_like_group(stream_id, kwargs)):
+        if not self._allowed(stream_id, user_id, kwargs):
             await self.ctx.send.text("你没有使用 JM 查询的权限。", stream_id)
             return True, "", 1
         keyword = str((matched_groups or {}).get("keyword") or "").strip()
@@ -294,7 +302,7 @@ class JMMetaPlugin(MaiBotPlugin):
         if not self.config.plugin.enabled:
             return True, "", 1
         user_id = user_id or self._resolve_user_id(kwargs)
-        if not self._check_permission(user_id, self._resolve_group_id(stream_id, kwargs), self._looks_like_group(stream_id, kwargs)):
+        if not self._allowed(stream_id, user_id, kwargs):
             await self.ctx.send.text("你没有使用 JM 查询的权限。", stream_id)
             return True, "", 1
         raw = str((matched_groups or {}).get("args") or "").strip()
@@ -328,7 +336,7 @@ class JMMetaPlugin(MaiBotPlugin):
         if not self.config.plugin.enabled:
             return True, "", 1
         user_id = user_id or self._resolve_user_id(kwargs)
-        if not self._check_permission(user_id, self._resolve_group_id(stream_id, kwargs), self._looks_like_group(stream_id, kwargs)):
+        if not self._allowed(stream_id, user_id, kwargs):
             await self.ctx.send.text("你没有使用 JM 查询的权限。", stream_id)
             return True, "", 1
         raw = str((matched_groups or {}).get("args") or "").strip()
@@ -396,8 +404,7 @@ class JMMetaPlugin(MaiBotPlugin):
             return {"success": False, "content": "插件未启用"}
         stream_id = str(kwargs.get("stream_id") or "").strip()
         user_id = self._resolve_user_id(kwargs)
-        group_id = self._resolve_group_id(stream_id, kwargs)
-        if not self._check_permission(user_id, group_id, self._looks_like_group(stream_id, kwargs)):
+        if not self._allowed(stream_id, user_id, kwargs):
             return {"success": False, "content": "当前会话未开放 JM 查询权限"}
 
         keyword = str(query or "").strip()
