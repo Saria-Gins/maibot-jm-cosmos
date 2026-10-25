@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.4
+
+- `import jmcomic` 改为懒加载：`common` 包名冲突不再导致插件加载失败，首次调用时给出可读错误；`on_load` 增加依赖预检与 warning
+- `scripts/fix_common_conflict.py` 预演输出与实际行为对齐（改名备份，不删除）
+- 移除 `_looks_like_group` 上重复的 `@staticmethod`
+- README 顶部新增加粗提示：默认环境会加载失败，安装前先读依赖冲突说明
+
 ## 2.0.3
 
 - 群号解析失败不再当成私聊放行：新增 `_looks_like_group()`，识别到群聊但拿不到群号时拒绝并打 warning
