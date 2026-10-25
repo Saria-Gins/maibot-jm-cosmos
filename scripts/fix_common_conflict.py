@@ -98,7 +98,7 @@ def main() -> int:
     print("\n计划：")
     print(f"  1. 备份 {old_dir} -> {old_dir}.backup-<时间戳>")
     print(f"  2. 复制为 {new_dir} 并改写 jmcomic / {PACKAGE_NEW} 内部引用")
-    print(f"  3. 删除原 {old_dir}")
+    print(f"  3. 把原目录改名为 {PACKAGE_OLD}.backup-<时间戳>（不删除，可回滚）")
 
     if not args.apply:
         print("\n这是预演。确认无误后加 --apply 执行。")
