@@ -61,7 +61,7 @@ def rewrite(root: Path) -> int:
 
     changed = 0
     for py in root.rglob("*.py"):
-        text = py.read_text(encoding="utf-8")
+        text = py.read_text(encoding="utf-8", errors="ignore")
         new = IMPORT_RE.sub(r"\1jmcommon\2", FROM_RE.sub(r"\1jmcommon\2", text))
         if new != text:
             py.write_text(new, encoding="utf-8", newline="\n")
@@ -106,16 +106,17 @@ def main() -> int:
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     backup = old_dir.with_name(f"{PACKAGE_OLD}.backup-{stamp}")
-    shutil.copytree(old_dir, backup)
-    print("已备份到", backup)
 
     if new_dir.exists():
         shutil.rmtree(new_dir)
     shutil.copytree(old_dir, new_dir, ignore=shutil.ignore_patterns("__pycache__"))
 
     changed = rewrite(new_dir) + rewrite(jm_dir)
-    shutil.rmtree(old_dir)
-    print(f"已改写 {changed} 个文件，原目录已删除。")
+
+    # 只改名，不删除：原目录保留为 <common>.backup-<时间戳>，随时可回滚
+    os.rename(old_dir, backup)
+    print(f"已改写 {changed} 个文件。")
+    print(f"原目录已改名为 {backup.name}（未删除），需要回滚时改回 {PACKAGE_OLD} 即可。")
     print("建议重启 MaiBot 后验证 import jmcomic 是否正常。")
     return 0
 
