@@ -86,63 +86,75 @@ class JMMetaPlugin(MaiBotPlugin):
 
     # ------------------------------------------------------------------ 数据层
 
-    def _run_bridge(self, op: str, **params: Any) -> Any:
-        """调用桥接子进程执行查询，返回解析后的结果。
+    def _call_bridge(self, op: str, params: Dict[str, Any]) -> Any:
+        """在线程里同步执行桥接进程。
 
-        jmcomic 依赖的顶层包 `common` 与 MaiBot 的 `src/common` 同名，
-        放在插件进程里导入必然撞名。桥接进程的 sys.path[0] 是 scripts 目录，
-        不含 MaiBot 的 src，因此能在独立进程里正常导入 jmcomic。
+        `subprocess.run(timeout=...)` 在超时会 kill 子进程，所以不会留下僵尸进程；
+        线程本身在 kill 后也会很快结束。
         """
 
         if not _BRIDGE.is_file():
-            raise RuntimeError(f"缺少桥接脚本: {_BRIDGE}")
+            raise RuntimeError("查询桥接脚本缺失，请重新安装插件")
         payload = json.dumps({"op": op, "limit": self.config.query.max_results, **params},
                              ensure_ascii=False)
         env = dict(os.environ)
         env.pop("PYTHONPATH", None)  # 不让宿主注入的路径污染子进程
-        proc = subprocess.run(
-            [sys.executable, str(_BRIDGE)],
-            input=payload,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=self.config.query.timeout_seconds,
-            env=env,
-            cwd=str(_BRIDGE.parent),
-        )
-        stdout = proc.stdout.strip()
-        if not stdout:
-            detail = (proc.stderr or "").strip()[-300:]
-            raise RuntimeError(f"桥接进程未返回结果: {detail or '无输出'}")
         try:
-            data = json.loads(stdout)
+            proc = subprocess.run(
+                [sys.executable, str(_BRIDGE)],
+                input=payload,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=self.config.query.timeout_seconds,
+                env=env,
+                cwd=str(_BRIDGE.parent),
+            )
+        except subprocess.TimeoutExpired as exc:
+            self.ctx.logger.warning("[JM] 查询桥接超时，子进程已终止")
+            raise RuntimeError("查询超时") from exc
+
+        text = (proc.stdout or "").strip()
+        if not text:
+            detail = (proc.stderr or "").strip()[-300:]
+            self.ctx.logger.warning(f"[JM] 桥接无输出: {detail or '无输出'}")
+            raise RuntimeError("查询失败")
+        try:
+            data = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise RuntimeError(f"桥接返回内容无法解析: {exc}") from exc
+            self.ctx.logger.warning(f"[JM] 桥接返回非 JSON: {text[:200]}")
+            raise RuntimeError("查询失败") from exc
         if not data.get("ok"):
-            raise RuntimeError(str(data.get("error") or "查询失败"))
+            self.ctx.logger.warning(f"[JM] 桥接返回错误: {data.get('error')}")
+            raise RuntimeError("查询失败")
         return data.get("result")
 
-    def _fetch_detail(self, album_id: str) -> Dict[str, Any]:
+    async def _run_bridge(self, op: str, **params: Any) -> Any:
+        """异步包装：把阻塞的桥接调用丢进线程池，避免卡住事件循环。"""
+
+        return await asyncio.to_thread(self._call_bridge, op, params)
+
+    async def _fetch_detail(self, album_id: str) -> Dict[str, Any]:
         """读取专辑详情。"""
 
-        return self._run_bridge("detail", album_id=album_id)
+        return await self._run_bridge("detail", album_id=album_id)
 
-    def _search(self, keyword: str, limit: int) -> List[Dict[str, str]]:
+    async def _search(self, keyword: str, limit: int) -> List[Dict[str, str]]:
         """按关键词搜索。"""
 
-        return self._run_bridge("search", keyword=keyword, limit=limit)
+        return await self._run_bridge("search", keyword=keyword, limit=limit)
 
-    def _ranking(self, kind: str, page: int, limit: int) -> List[Dict[str, str]]:
+    async def _ranking(self, kind: str, page: int, limit: int) -> List[Dict[str, str]]:
         """获取周榜 / 月榜。"""
 
-        return self._run_bridge("ranking", kind=kind, page=page, limit=limit)
+        return await self._run_bridge("ranking", kind=kind, page=page, limit=limit)
 
-    def _recommend(self, order_by: str, time_range: str, page: int, limit: int) -> List[Dict[str, str]]:
+    async def _recommend(self, order_by: str, time_range: str, page: int, limit: int) -> List[Dict[str, str]]:
         """按排序与时间范围获取推荐。"""
 
-        return self._run_bridge("recommend", order_by=order_by, time_range=time_range,
-                                page=page, limit=limit)
+        return await self._run_bridge("recommend", order_by=order_by, time_range=time_range,
+                                      page=page, limit=limit)
 
     @staticmethod
     def _format_list(title: str, items: List[Dict[str, str]]) -> str:
@@ -233,14 +245,6 @@ class JMMetaPlugin(MaiBotPlugin):
         scope, group_id = self._resolve_scope(stream_id, kwargs)
         return self._check_permission(user, scope, group_id)
 
-    async def _run(self, func: Any, *args: Any) -> Any:
-        """带超时地在线程池里执行阻塞查询。"""
-
-        return await asyncio.wait_for(
-            asyncio.to_thread(func, *args),
-            timeout=self.config.query.timeout_seconds,
-        )
-
     # ------------------------------------------------------------------ 命令
 
     @Command("jmi", description="查看 JM 本子详情：/jmi 123456", pattern=r"^/jmi\s+(?P<album_id>\d+)")
@@ -253,12 +257,12 @@ class JMMetaPlugin(MaiBotPlugin):
             return True, "", 1
         album_id = str((matched_groups or {}).get("album_id") or "").strip()
         try:
-            detail = await self._run(self._fetch_detail, album_id)
+            detail = await self._fetch_detail(album_id)
         except asyncio.TimeoutError:
             await self.ctx.send.text("查询超时，请稍后再试。", stream_id)
             return True, "", 1
         except Exception as exc:  # noqa: BLE001
-            await self.ctx.send.text(f"查询失败：{exc}", stream_id)
+            await self.ctx.send.text("查询失败，请稍后再试。", stream_id)
             return True, "", 1
         tags = "、".join(str(t) for t in detail["tags"][:8]) or "无"
         authors = "、".join(str(a) for a in detail["authors"][:4]) or "未知"
@@ -281,12 +285,12 @@ class JMMetaPlugin(MaiBotPlugin):
             await self.ctx.send.text("用法：/jms 关键词", stream_id)
             return True, "", 1
         try:
-            items = await self._run(self._search, keyword, self.config.query.max_results)
+            items = await self._search(keyword, self.config.query.max_results)
         except asyncio.TimeoutError:
             await self.ctx.send.text("搜索超时，请稍后再试。", stream_id)
             return True, "", 1
         except Exception as exc:  # noqa: BLE001
-            await self.ctx.send.text(f"搜索失败：{exc}", stream_id)
+            await self.ctx.send.text("搜索失败，请稍后再试。", stream_id)
             return True, "", 1
         await self.ctx.send.text(self._format_list(f"搜索「{keyword}」", items), stream_id)
         return True, "", 1
@@ -314,12 +318,12 @@ class JMMetaPlugin(MaiBotPlugin):
                 await self.ctx.send.text(f"未知参数：{token}\n用法：/jmrank [week|month] [页码]", stream_id)
                 return True, "", 1
         try:
-            items = await self._run(self._ranking, kind, page, self.config.query.max_results)
+            items = await self._ranking(kind, page, self.config.query.max_results)
         except asyncio.TimeoutError:
             await self.ctx.send.text("获取榜单超时，请稍后再试。", stream_id)
             return True, "", 1
         except Exception as exc:  # noqa: BLE001
-            await self.ctx.send.text(f"获取榜单失败：{exc}", stream_id)
+            await self.ctx.send.text("获取榜单失败，请稍后再试。", stream_id)
             return True, "", 1
         title = f"JM {'周榜' if kind == 'week' else '月榜'} 第 {page} 页"
         await self.ctx.send.text(self._format_list(title, items), stream_id)
@@ -357,12 +361,12 @@ class JMMetaPlugin(MaiBotPlugin):
                 )
                 return True, "", 1
         try:
-            items = await self._run(self._recommend, order_by, time_range, page, self.config.query.max_results)
+            items = await self._recommend(order_by, time_range, page, self.config.query.max_results)
         except asyncio.TimeoutError:
             await self.ctx.send.text("获取推荐超时，请稍后再试。", stream_id)
             return True, "", 1
         except Exception as exc:  # noqa: BLE001
-            await self.ctx.send.text(f"获取推荐失败：{exc}", stream_id)
+            await self.ctx.send.text("获取推荐失败，请稍后再试。", stream_id)
             return True, "", 1
         order_name = {"mr": "最新", "mv": "最多观看", "mp": "最多图片", "tf": "最多喜欢", "tr": "最高评分"}.get(order_by, order_by)
         time_name = {"a": "全部时间", "t": "今天", "w": "本周", "m": "本月"}.get(time_range, time_range)
@@ -405,9 +409,9 @@ class JMMetaPlugin(MaiBotPlugin):
         if not keyword:
             return {"success": False, "content": "缺少关键词"}
         try:
-            items = await self._run(self._search, keyword, min(6, self.config.query.max_results))
+            items = await self._search(keyword, min(6, self.config.query.max_results))
         except Exception as exc:  # noqa: BLE001
-            return {"success": False, "content": f"搜索失败：{exc}"}
+            return {"success": False, "content": "搜索失败，请稍后再试"}
         if not items:
             return {"success": False, "content": "没有搜到结果"}
         return {"success": True, "content": "\n".join(f"[{i['id']}] {i['name']}" for i in items)}
