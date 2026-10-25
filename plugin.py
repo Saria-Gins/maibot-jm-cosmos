@@ -30,6 +30,16 @@ def _safe_name(name: str, fallback: str = "album") -> str:
     return (cleaned or fallback)[:80]
 
 
+def _is_within(child: Path, parent: Path) -> bool:
+    """判断路径是否位于父目录内，避免拼接值跳出下载根目录。"""
+
+    try:
+        child.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def _collect_images(root: Path) -> List[Path]:
     """按路径顺序收集下载目录里的图片，保证页码顺序。"""
 
@@ -53,7 +63,7 @@ class DownloadSection(PluginConfigBase):
     __ui_label__ = "下载"
     __ui_order__ = 1
 
-    base_dir: str = Field(default="data/plugins/gemiluxvii.jm-cosmos/downloads", description="下载根目录")
+    base_dir: str = Field(default="", description="下载根目录；留空则使用插件数据目录下的 downloads")
     max_pages: int = Field(default=300, ge=1, le=2000, description="单个本子最多允许多少页")
     timeout_seconds: int = Field(default=600, ge=30, le=3600, description="单次下载超时时间（秒）")
     keep_images: bool = Field(default=False, description="打包完成后是否保留原始图片")
@@ -68,8 +78,8 @@ class AccessSection(PluginConfigBase):
     __ui_order__ = 2
 
     allowed_users: List[str] = Field(default_factory=list, description="允许使用的 QQ 号；留空表示所有人可用")
-    allowed_groups: List[str] = Field(default_factory=list, description="允许使用的群号；留空表示所有群可用，私聊不受限制")
-    admin_bypass: bool = Field(default=True, description="管理员（bot_config 的 admins）始终可用")
+    allowed_groups: List[str] = Field(default_factory=list, description="允许使用的群号；allow_groups 开启后生效，留空表示所有群可用")
+    allow_groups: bool = Field(default=False, description="是否允许在群聊中使用；默认关闭，只在私聊可用")
 
 
 class JMCosmosConfig(PluginConfigBase):
@@ -112,10 +122,11 @@ class JMCosmosPlugin(MaiBotPlugin):
     def _base_dir(self) -> Path:
         """解析下载根目录；相对路径按 MaiBot 实例根目录展开。"""
 
-        raw = Path(self.config.download.base_dir)
-        if raw.is_absolute():
-            return raw
-        return Path.cwd() / raw
+        raw = str(self.config.download.base_dir or "").strip()
+        if not raw:
+            return Path(self.ctx.paths.data_dir) / "downloads"
+        path = Path(raw)
+        return path if path.is_absolute() else Path.cwd() / path
 
     @staticmethod
     def _resolve_group_id(stream_id: str, kwargs: Dict[str, Any]) -> str:
@@ -146,8 +157,11 @@ class JMCosmosPlugin(MaiBotPlugin):
         allowed_users = [str(x).strip() for x in self.config.access.allowed_users if str(x).strip()]
         if allowed_users and str(user_id).strip() not in allowed_users:
             return False
+        group = str(group_id or "").strip()
+        if group and not self.config.access.allow_groups:
+            return False
         allowed_groups = [str(x).strip() for x in self.config.access.allowed_groups if str(x).strip()]
-        if allowed_groups and group_id and str(group_id).strip() not in allowed_groups:
+        if allowed_groups and group and group not in allowed_groups:
             return False
         return True
 
@@ -333,7 +347,11 @@ class JMCosmosPlugin(MaiBotPlugin):
                 return True, "", True
 
             name = detail["name"] or album_id
-            target = self._base_dir() / album_id
+            base_dir = self._base_dir()
+            target = base_dir / album_id
+            if not _is_within(target, base_dir):
+                await self.ctx.send.text("下载目录校验失败，已中止。", stream_id)
+                return True, "", True
             if target.exists():
                 shutil.rmtree(target, ignore_errors=True)
             target.mkdir(parents=True, exist_ok=True)
@@ -387,8 +405,10 @@ class JMCosmosPlugin(MaiBotPlugin):
 
     @Command("jmi", description="查看 JM 本子详情：/jmi 123456", pattern=r"^/jmi\s+(?P<album_id>\d+)")
     async def cmd_info(self, stream_id: str = "", user_id: str = "", matched_groups: Optional[Dict[str, str]] = None, **kwargs: Any) -> Tuple[bool, str, bool]:
-        if not self._check_permission(user_id, self._resolve_group_id(stream_id, kwargs)):
-            await self.ctx.send.text("你没有使用 JM 的权限。", stream_id)
+        group_id = self._resolve_group_id(stream_id, kwargs)
+        if not self._check_permission(user_id, group_id):
+            hint = "群聊默认未开放，请让管理员在配置中开启 allow_groups" if group_id else "你没有使用 JM 的权限。"
+            await self.ctx.send.text(hint, stream_id)
             return True, "", True
         album_id = str((matched_groups or {}).get("album_id") or "").strip()
         try:
@@ -406,8 +426,10 @@ class JMCosmosPlugin(MaiBotPlugin):
 
     @Command("jms", description="搜索 JM 本子：/jms 关键词", pattern=r"^/jms\s+(?P<keyword>.+)$")
     async def cmd_search(self, stream_id: str = "", user_id: str = "", matched_groups: Optional[Dict[str, str]] = None, **kwargs: Any) -> Tuple[bool, str, bool]:
-        if not self._check_permission(user_id, self._resolve_group_id(stream_id, kwargs)):
-            await self.ctx.send.text("你没有使用 JM 的权限。", stream_id)
+        group_id = self._resolve_group_id(stream_id, kwargs)
+        if not self._check_permission(user_id, group_id):
+            hint = "群聊默认未开放，请让管理员在配置中开启 allow_groups" if group_id else "你没有使用 JM 的权限。"
+            await self.ctx.send.text(hint, stream_id)
             return True, "", True
         keyword = str((matched_groups or {}).get("keyword") or "").strip()
         if not keyword:
@@ -427,8 +449,10 @@ class JMCosmosPlugin(MaiBotPlugin):
 
     @Command("jmrank", description="查看 JM 周榜/月榜：/jmrank week 1", pattern=r"^/jmrank(?:\s+(?P<args>.*))?$")
     async def cmd_rank(self, stream_id: str = "", user_id: str = "", matched_groups: Optional[Dict[str, str]] = None, **kwargs: Any) -> Tuple[bool, str, bool]:
-        if not self._check_permission(user_id, self._resolve_group_id(stream_id, kwargs)):
-            await self.ctx.send.text("你没有使用 JM 的权限。", stream_id)
+        group_id = self._resolve_group_id(stream_id, kwargs)
+        if not self._check_permission(user_id, group_id):
+            hint = "群聊默认未开放，请让管理员在配置中开启 allow_groups" if group_id else "你没有使用 JM 的权限。"
+            await self.ctx.send.text(hint, stream_id)
             return True, "", True
         raw = str((matched_groups or {}).get("args") or "").strip()
         kind = "week"
@@ -455,8 +479,10 @@ class JMCosmosPlugin(MaiBotPlugin):
 
     @Command("jmrec", description="推荐本子：/jmrec [排序] [时间] [页码]", pattern=r"^/jmrec(?:\s+(?P<args>.*))?$")
     async def cmd_recommend(self, stream_id: str = "", user_id: str = "", matched_groups: Optional[Dict[str, str]] = None, **kwargs: Any) -> Tuple[bool, str, bool]:
-        if not self._check_permission(user_id, self._resolve_group_id(stream_id, kwargs)):
-            await self.ctx.send.text("你没有使用 JM 的权限。", stream_id)
+        group_id = self._resolve_group_id(stream_id, kwargs)
+        if not self._check_permission(user_id, group_id):
+            hint = "群聊默认未开放，请让管理员在配置中开启 allow_groups" if group_id else "你没有使用 JM 的权限。"
+            await self.ctx.send.text(hint, stream_id)
             return True, "", True
         raw = str((matched_groups or {}).get("args") or "").strip()
         order_map = {
