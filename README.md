@@ -42,9 +42,11 @@ pip install "jmcomic>=2.6.10,<3"
 | `query.max_results` | 8 | 每个列表最多返回条数 |
 | `access.allowed_users` | 空 | 用户白名单；留空表示所有人 |
 | `access.allowed_groups` | 空 | 群白名单；留空表示所有群 |
-| `access.allow_groups` | true | 是否允许群聊使用 |
+| `access.allow_groups` | **false** | 是否允许群聊使用；默认关闭，避免成人向标题直接进群 |
 
-权限规则：用户白名单命中 → 群白名单命中 → 群聊开关。三层都通过才放行。
+权限规则：用户白名单命中 → 群聊开关 → 群白名单命中。三层都通过才放行。
+
+**默认只在私聊可用**：站点条目以成人向为主，返回到群聊会造成不必要的影响。需要群聊的部署者请自行开启 `allow_groups` 并确认适用范围与合规责任。
 
 ## ⚠️ 依赖冲突说明
 
@@ -71,7 +73,7 @@ ImportError: cannot import name 'time_stamp' from 'common'
 
 - 目标站点连接不稳，`jmcomic` 会自动换域名重试
 - 周榜接口目前经常返回空列表，属站点侧情况
-- 站点内容以成人向为主，是否查询、在什么范围展示由部署者自行负责
+- 站点内容以成人向为主；本插件默认只在私聊可用，是否在群聊展示、在什么范围展示，由部署者自行负责
 
 ## 致谢
 
@@ -81,4 +83,4 @@ ImportError: cannot import name 'time_stamp' from 'common'
 
 ## 许可证
 
-GPL-3.0-or-later，与原项目一致。详见 [LICENSE](LICENSE)。
+AGPL-3.0-or-later，与原项目一致（原项目即为 AGPL-3.0）。详见 [LICENSE](LICENSE)。
