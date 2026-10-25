@@ -7,7 +7,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import re
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -45,28 +50,7 @@ class AccessSection(PluginConfigBase):
     allow_groups: bool = Field(default=False, description="是否允许在群聊中使用；默认关闭，成人向标题不会直接进群")
 
 
-_JMCOMIC: Any = None
-
-
-def _load_jmcomic() -> Any:
-    """延迟导入 jmcomic。
-
-    jmcomic 依赖的 commonx 会在 site-packages 里装出一个顶层 `common` 包，
-    与 MaiBot 的 `src/common` 同名。放在模块顶层 import 会让插件在加载阶段直接失败，
-    这里改成首次使用时导入，并把原因翻译成人能看懂的话。
-    """
-
-    global _JMCOMIC
-    if _JMCOMIC is None:
-        try:
-            import jmcomic  # noqa: PLC0415 - 刻意延迟导入，避免加载阶段被 common 冲突打断
-        except ImportError as exc:
-            raise RuntimeError(
-                "jmcomic 导入失败，通常是 common 包名与 MaiBot 的 src/common 冲突；"
-                "请按 README 的「依赖冲突说明」处理（推荐为 jmcomic 单独建虚拟环境）"
-            ) from exc
-        _JMCOMIC = jmcomic
-    return _JMCOMIC
+_BRIDGE = Path(__file__).resolve().parent / "scripts" / "jm_bridge.py"
 
 
 class JMMetaConfig(PluginConfigBase):
@@ -83,10 +67,10 @@ class JMMetaPlugin(MaiBotPlugin):
     config_model = JMMetaConfig
 
     async def on_load(self) -> None:
-        try:
-            _load_jmcomic()
-        except Exception as exc:  # noqa: BLE001 - 加载阶段只提示，不阻断插件注册
-            self.ctx.logger.warning(f"[JM] 依赖检查失败：{exc}")
+        if not _BRIDGE.is_file():
+            self.ctx.logger.warning(f"[JM] 缺少桥接脚本：{_BRIDGE}")
+        else:
+            self.ctx.logger.info(f"[JM] 查询桥接已就绪：{_BRIDGE}")
         self.ctx.logger.info("[JM] 元数据插件已加载（仅查询，不下载）")
 
     async def on_unload(self) -> None:
@@ -102,53 +86,63 @@ class JMMetaPlugin(MaiBotPlugin):
 
     # ------------------------------------------------------------------ 数据层
 
-    @staticmethod
-    def _page_items(page: Any, limit: int) -> List[Dict[str, str]]:
-        """把 JmSearchPage 的 content 统一成 {id, name, author} 列表。"""
+    def _run_bridge(self, op: str, **params: Any) -> Any:
+        """调用桥接子进程执行查询，返回解析后的结果。
 
-        items: List[Dict[str, str]] = []
-        for item in list(getattr(page, "content", []) or [])[:limit]:
-            album_id, info = item
-            items.append({
-                "id": str(album_id),
-                "name": str((info or {}).get("name") or ""),
-                "author": str((info or {}).get("author") or ""),
-            })
-        return items
+        jmcomic 依赖的顶层包 `common` 与 MaiBot 的 `src/common` 同名，
+        放在插件进程里导入必然撞名。桥接进程的 sys.path[0] 是 scripts 目录，
+        不含 MaiBot 的 src，因此能在独立进程里正常导入 jmcomic。
+        """
 
-    def _client(self) -> Any:
-        """构造 jmcomic 客户端（首次调用时才导入 jmcomic）。"""
-
-        return _load_jmcomic().JmOption.default().build_jm_client()
+        if not _BRIDGE.is_file():
+            raise RuntimeError(f"缺少桥接脚本: {_BRIDGE}")
+        payload = json.dumps({"op": op, "limit": self.config.query.max_results, **params},
+                             ensure_ascii=False)
+        env = dict(os.environ)
+        env.pop("PYTHONPATH", None)  # 不让宿主注入的路径污染子进程
+        proc = subprocess.run(
+            [sys.executable, str(_BRIDGE)],
+            input=payload,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=self.config.query.timeout_seconds,
+            env=env,
+            cwd=str(_BRIDGE.parent),
+        )
+        stdout = proc.stdout.strip()
+        if not stdout:
+            detail = (proc.stderr or "").strip()[-300:]
+            raise RuntimeError(f"桥接进程未返回结果: {detail or '无输出'}")
+        try:
+            data = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"桥接返回内容无法解析: {exc}") from exc
+        if not data.get("ok"):
+            raise RuntimeError(str(data.get("error") or "查询失败"))
+        return data.get("result")
 
     def _fetch_detail(self, album_id: str) -> Dict[str, Any]:
         """读取专辑详情。"""
 
-        detail = self._client().get_album_detail(album_id)
-        return {
-            "id": str(getattr(detail, "album_id", album_id)),
-            "name": str(getattr(detail, "name", "") or ""),
-            "page_count": int(getattr(detail, "page_count", 0) or 0),
-            "authors": list(getattr(detail, "authors", []) or []),
-            "tags": list(getattr(detail, "tags", []) or []),
-        }
+        return self._run_bridge("detail", album_id=album_id)
 
     def _search(self, keyword: str, limit: int) -> List[Dict[str, str]]:
         """按关键词搜索。"""
 
-        return self._page_items(self._client().search_site(keyword, 1), limit)
+        return self._run_bridge("search", keyword=keyword, limit=limit)
 
     def _ranking(self, kind: str, page: int, limit: int) -> List[Dict[str, str]]:
         """获取周榜 / 月榜。"""
 
-        client = self._client()
-        fetch = client.week_ranking if kind == "week" else client.month_ranking
-        return self._page_items(fetch(page), limit)
+        return self._run_bridge("ranking", kind=kind, page=page, limit=limit)
 
     def _recommend(self, order_by: str, time_range: str, page: int, limit: int) -> List[Dict[str, str]]:
         """按排序与时间范围获取推荐。"""
 
-        return self._page_items(self._client().categories_filter(page, time_range, "0", order_by), limit)
+        return self._run_bridge("recommend", order_by=order_by, time_range=time_range,
+                                page=page, limit=limit)
 
     @staticmethod
     def _format_list(title: str, items: List[Dict[str, str]]) -> str:
