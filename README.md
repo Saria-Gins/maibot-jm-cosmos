@@ -6,6 +6,11 @@ JM 漫画**元数据查询**插件：搜索、详情、榜单、推荐。
 >
 > **本版本只做只读查询：不下载、不打包、不发送任何文件。** 下载功能属于另一个独立版本，不在本仓库、也不在插件中心分发。
 
+> [!IMPORTANT]
+> **默认环境下装上去会直接加载失败，不是某条命令不好使。**
+> `jmcomic` 依赖的顶层包 `common` 与 MaiBot 的 `src/common` 同名，导入阶段就会抛 `ImportError: cannot import name 'time_stamp' from 'common'`。
+> **安装前请先读下面的「依赖冲突说明」**，按其中的方案 1（独立 venv）处理。
+
 ## 功能
 
 | 命令 | 说明 | 示例 |
@@ -50,13 +55,16 @@ pip install "jmcomic>=2.6.10,<3"
 
 ## ⚠️ 依赖冲突说明
 
+> 这一步没做的话，插件在**加载阶段**就会失败，而不是运行到某条命令才报错。
+
 `jmcomic` 依赖一个**顶层包 `common`**，而 MaiBot 自己也有 `src/common`。插件运行时 `src` 在 `sys.path` 里，`import common` 会解析到 MaiBot 的实现，报错：
 
 ```
 ImportError: cannot import name 'time_stamp' from 'common'
 ```
 
-`jmcomic` 在多处函数体内做懒加载，插件层无法绕过。可选方案：
+`jmcomic` 在多处函数体内做懒加载，只是把 import 推迟并不能真正绕过名字冲突。
+本插件已把 `import jmcomic` 改成懒加载，好处是**插件本身能正常加载**、失败时给出可读提示；但要真正查到数据，仍然需要按下面的方案之一处理。可选方案：
 
 1. **推荐**：给 jmcomic 单独 venv，插件通过子进程调用
 2. 修改 site-packages（本仓库 `scripts/fix_common_conflict.py`，**可能影响你以为无关的包**，**强烈建议优先选方案 1**）：**属于破坏性操作**，脚本默认只预演；`--apply` 才执行，会先检查是否还有其它包引用 `common`（含 `from common.xxx` 子包写法），并且**只把原目录改名为备份、不删除**，可随时回滚
