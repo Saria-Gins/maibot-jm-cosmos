@@ -347,6 +347,14 @@ class JMMetaPlugin(MaiBotPlugin):
         },
     )
     async def tool_search(self, query: str = "", **kwargs: Any) -> Dict[str, Any]:
+        if not self.config.plugin.enabled:
+            return {"success": False, "content": "插件未启用"}
+        stream_id = str(kwargs.get("stream_id") or "").strip()
+        user_id = self._resolve_user_id(kwargs)
+        group_id = self._resolve_group_id(stream_id, kwargs)
+        if not self._check_permission(user_id, group_id):
+            return {"success": False, "content": "当前会话未开放 JM 查询权限"}
+
         keyword = str(query or "").strip()
         if not keyword:
             return {"success": False, "content": "缺少关键词"}
