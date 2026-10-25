@@ -28,3 +28,6 @@
 - 下载前校验目标目录仍在下载根目录内，防止路径穿越
 - `_manifest.json` 增加 `plugin_type: tool`
 - README 增加内容分级与使用范围说明；依赖冲突章节改为风险提示，并附 `scripts/fix_common_conflict.py`（默认只预演）
+## 1.1.6
+
+- 修正 `_manifest.json` 的 `id` 为 `github.saria-gins.maibot-jm-cosmos`，与插件中心登记一致
