@@ -1,14 +1,14 @@
 {
   "manifest_version": 2,
   "id": "github.saria-gins.maibot-jm-cosmos",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "name": "JM-Cosmos Metadata",
   "description": "JM 漫画元数据查询：搜索、详情、榜单、推荐。只读查询，不下载、不打包、不发送文件。移植自 GEMILUXVII 的 astrbot_plugin_jm_cosmos 查询部分。",
   "author": {
     "name": "Saria-Gins",
     "url": "https://github.com/Saria-Gins"
   },
-  "license": "GPL-v3.0-or-later",
+  "license": "AGPL-3.0-or-later",
   "urls": {
     "repository": "https://github.com/Saria-Gins/maibot-jm-cosmos",
     "homepage": "https://github.com/Saria-Gins/maibot-jm-cosmos",
@@ -25,7 +25,11 @@
     "max_version": "2.17.99"
   },
   "dependencies": [
-    { "type": "python_package", "name": "jmcomic", "version_spec": ">=2.6.10,<3" }
+    {
+      "type": "python_package",
+      "name": "jmcomic",
+      "version_spec": ">=2.6.10,<3"
+    }
   ],
   "capabilities": [
     "send.text"
@@ -33,6 +37,8 @@
   "plugin_type": "tool",
   "i18n": {
     "default_locale": "zh-CN",
-    "supported_locales": ["zh-CN"]
+    "supported_locales": [
+      "zh-CN"
+    ]
   }
 }
