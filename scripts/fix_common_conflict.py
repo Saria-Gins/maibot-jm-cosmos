@@ -96,8 +96,8 @@ def main() -> int:
         return 2
 
     print("\n计划：")
-    print(f"  1. 备份 {old_dir} -> {old_dir}.backup-<时间戳>")
-    print(f"  2. 复制为 {new_dir} 并改写 jmcomic / {PACKAGE_NEW} 内部引用")
+    print(f"  1. 复制 {old_dir} -> {new_dir}")
+    print(f"  2. 改写 {PACKAGE_NEW} 与 jmcomic 内部的 common 引用")
     print(f"  3. 把原目录改名为 {PACKAGE_OLD}.backup-<时间戳>（不删除，可回滚）")
 
     if not args.apply:
@@ -108,9 +108,10 @@ def main() -> int:
     backup = old_dir.with_name(f"{PACKAGE_OLD}.backup-{stamp}")
 
     if new_dir.exists():
-        shutil.rmtree(new_dir)
-    shutil.copytree(old_dir, new_dir, ignore=shutil.ignore_patterns("__pycache__"))
+        print(f"{new_dir} 已存在，为避免覆盖已改写过的包，请先人工确认后移走它再重试。")
+        return 1
 
+    shutil.copytree(old_dir, new_dir, ignore=shutil.ignore_patterns("__pycache__"))
     changed = rewrite(new_dir) + rewrite(jm_dir)
 
     # 只改名，不删除：原目录保留为 <common>.backup-<时间戳>，随时可回滚
