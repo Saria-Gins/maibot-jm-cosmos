@@ -17,3 +17,6 @@
 
 - 新增 `access.allowed_groups`：群白名单，留空表示所有群可用，私聊不受限制
 - 抽出 `_resolve_group_id`，从 kwargs / message 结构 / stream_id 三路解析群号
+## 1.1.4
+
+- 修正 `_manifest.json` 的 `sdk` 版本范围：`2.16.0 ~ 2.17.99`（插件市场校验不允许第一、第二位为 99）
