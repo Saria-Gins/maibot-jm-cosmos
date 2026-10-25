@@ -70,13 +70,14 @@ ImportError: cannot import name 'time_stamp' from 'common'
 
 因此**默认安装后查询就是可用的**，不需要动宿主环境，也不需要自己写桥接。
 
-> 仓库里还留着早期的 `scripts/fix_common_conflict.py`（改 site-packages 的方案），现在**不再需要**，仅作历史参考；它不在插件加载路径里，也不会自动执行。
+> 早期那版改 site-packages 的脚本（`fix_common_conflict.py`）已在 v2.1.1 从仓库移除，避免有人误用去动宿主环境。
 
 ## 实现说明
 
 - 所有网络访问只经 `jmcomic` 请求 JM 站点，不涉及聊天记录、用户 ID、群号或插件配置
 - 阻塞调用放在线程池里并带超时，不阻塞事件循环
 - 查询走内置桥接子进程（`scripts/jm_bridge.py`），jmcomic 不与 MaiBot 共享进程
+- 桥接调用在线程池执行，`subprocess.run(timeout=...)` 超时会终止子进程；面向用户的错误只回固定文案，细节进日志
 - 输出只包含标题、编号、页数、作者、标签等元数据
 
 ## 已知限制
