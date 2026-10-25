@@ -20,3 +20,11 @@
 ## 1.1.4
 
 - 修正 `_manifest.json` 的 `sdk` 版本范围：`2.16.0 ~ 2.17.99`（插件市场校验不允许第一、第二位为 99）
+## 1.1.5
+
+- 仓库不再提交 `config.toml`，并加入 `.gitignore`；配置由运行时生成
+- 移除空转字段 `admin_bypass`，改为真实生效的 `access.allow_groups`（默认 false，仅私聊可用）
+- `download.base_dir` 默认留空，回落到插件数据目录（`ctx.paths.data_dir`）
+- 下载前校验目标目录仍在下载根目录内，防止路径穿越
+- `_manifest.json` 增加 `plugin_type: tool`
+- README 增加内容分级与使用范围说明；依赖冲突章节改为风险提示，并附 `scripts/fix_common_conflict.py`（默认只预演）
