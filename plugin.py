@@ -10,7 +10,6 @@ import asyncio
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-import jmcomic
 
 from maibot_sdk import Command, Field, MaiBotPlugin, PluginConfigBase, Tool
 
@@ -46,6 +45,30 @@ class AccessSection(PluginConfigBase):
     allow_groups: bool = Field(default=False, description="是否允许在群聊中使用；默认关闭，成人向标题不会直接进群")
 
 
+_JMCOMIC: Any = None
+
+
+def _load_jmcomic() -> Any:
+    """延迟导入 jmcomic。
+
+    jmcomic 依赖的 commonx 会在 site-packages 里装出一个顶层 `common` 包，
+    与 MaiBot 的 `src/common` 同名。放在模块顶层 import 会让插件在加载阶段直接失败，
+    这里改成首次使用时导入，并把原因翻译成人能看懂的话。
+    """
+
+    global _JMCOMIC
+    if _JMCOMIC is None:
+        try:
+            import jmcomic  # noqa: PLC0415 - 刻意延迟导入，避免加载阶段被 common 冲突打断
+        except ImportError as exc:
+            raise RuntimeError(
+                "jmcomic 导入失败，通常是 common 包名与 MaiBot 的 src/common 冲突；"
+                "请按 README 的「依赖冲突说明」处理（推荐为 jmcomic 单独建虚拟环境）"
+            ) from exc
+        _JMCOMIC = jmcomic
+    return _JMCOMIC
+
+
 class JMMetaConfig(PluginConfigBase):
     """JM 元数据插件总配置。"""
 
@@ -60,6 +83,10 @@ class JMMetaPlugin(MaiBotPlugin):
     config_model = JMMetaConfig
 
     async def on_load(self) -> None:
+        try:
+            _load_jmcomic()
+        except Exception as exc:  # noqa: BLE001 - 加载阶段只提示，不阻断插件注册
+            self.ctx.logger.warning(f"[JM] 依赖检查失败：{exc}")
         self.ctx.logger.info("[JM] 元数据插件已加载（仅查询，不下载）")
 
     async def on_unload(self) -> None:
@@ -90,9 +117,9 @@ class JMMetaPlugin(MaiBotPlugin):
         return items
 
     def _client(self) -> Any:
-        """构造 jmcomic 客户端。"""
+        """构造 jmcomic 客户端（首次调用时才导入 jmcomic）。"""
 
-        return jmcomic.JmOption.default().build_jm_client()
+        return _load_jmcomic().JmOption.default().build_jm_client()
 
     def _fetch_detail(self, album_id: str) -> Dict[str, Any]:
         """读取专辑详情。"""
@@ -152,7 +179,6 @@ class JMMetaPlugin(MaiBotPlugin):
                         return value
         return ""
 
-    @staticmethod
     @staticmethod
     def _looks_like_group(stream_id: str, kwargs: Dict[str, Any]) -> bool:
         """判断当前会话是否像群聊：有 group_info，或 stream_id 带 group 标记。"""
