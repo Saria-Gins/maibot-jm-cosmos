@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.3
+
+- 群号解析失败不再当成私聊放行：新增 `_looks_like_group()`，识别到群聊但拿不到群号时拒绝并打 warning
+- `scripts/fix_common_conflict.py` 不再删除原 `common` 目录，改为改名备份，可随时回滚；`read_text` 增加容错
+- README 明确提示脚本可能影响无关包，独立 venv 优先
+
 ## 2.0.2
 
 - LLM 工具 `jm_search_albums` 补上权限校验：先判 `plugin.enabled`，再过 `_check_permission`（用户白名单 + 群聊开关 + 群白名单），默认私聊承诺不再从模型调用路径漏出
