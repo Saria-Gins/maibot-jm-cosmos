@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import jmcomic
 
 from maibot_sdk import Command, Field, MaiBotPlugin, PluginConfigBase, Tool
-from maibot_sdk.types import ActivationType
 
 
 class PluginSection(PluginConfigBase):
@@ -44,7 +43,7 @@ class AccessSection(PluginConfigBase):
 
     allowed_users: List[str] = Field(default_factory=list, description="允许使用的 QQ 号；留空表示所有人可用")
     allowed_groups: List[str] = Field(default_factory=list, description="允许使用的群号；留空表示所有群可用")
-    allow_groups: bool = Field(default=True, description="是否允许在群聊中使用")
+    allow_groups: bool = Field(default=False, description="是否允许在群聊中使用；默认关闭，成人向标题不会直接进群")
 
 
 class JMMetaConfig(PluginConfigBase):
@@ -136,6 +135,24 @@ class JMMetaPlugin(MaiBotPlugin):
     # ------------------------------------------------------------------ 权限
 
     @staticmethod
+    def _resolve_user_id(kwargs: Dict[str, Any]) -> str:
+        """从 kwargs 或 message 结构解析调用者 QQ。"""
+
+        value = str(kwargs.get("user_id") or "").strip()
+        if value.isdigit():
+            return value
+        message = kwargs.get("message")
+        if isinstance(message, dict):
+            info = message.get("message_info") or {}
+            if isinstance(info, dict):
+                user_info = info.get("user_info") or {}
+                if isinstance(user_info, dict):
+                    value = str(user_info.get("user_id") or "").strip()
+                    if value.isdigit():
+                        return value
+        return ""
+
+    @staticmethod
     def _resolve_group_id(stream_id: str, kwargs: Dict[str, Any]) -> str:
         """从 kwargs 或 stream_id 解析群号；私聊返回空串。"""
 
@@ -181,51 +198,60 @@ class JMMetaPlugin(MaiBotPlugin):
 
     @Command("jmi", description="查看 JM 本子详情：/jmi 123456", pattern=r"^/jmi\s+(?P<album_id>\d+)")
     async def cmd_info(self, stream_id: str = "", user_id: str = "", matched_groups: Optional[Dict[str, str]] = None, **kwargs: Any) -> Tuple[bool, str, bool]:
+        if not self.config.plugin.enabled:
+            return True, "", 1
+        user_id = user_id or self._resolve_user_id(kwargs)
         if not self._check_permission(user_id, self._resolve_group_id(stream_id, kwargs)):
             await self.ctx.send.text("你没有使用 JM 查询的权限。", stream_id)
-            return True, "", True
+            return True, "", 1
         album_id = str((matched_groups or {}).get("album_id") or "").strip()
         try:
             detail = await self._run(self._fetch_detail, album_id)
         except asyncio.TimeoutError:
             await self.ctx.send.text("查询超时，请稍后再试。", stream_id)
-            return True, "", True
+            return True, "", 1
         except Exception as exc:  # noqa: BLE001
             await self.ctx.send.text(f"查询失败：{exc}", stream_id)
-            return True, "", True
+            return True, "", 1
         tags = "、".join(str(t) for t in detail["tags"][:8]) or "无"
         authors = "、".join(str(a) for a in detail["authors"][:4]) or "未知"
         await self.ctx.send.text(
             f"《{detail['name']}》\n编号：{detail['id']}\n页数：{detail['page_count']}\n作者：{authors}\n标签：{tags}",
             stream_id,
         )
-        return True, "", True
+        return True, "", 1
 
     @Command("jms", description="搜索 JM 本子：/jms 关键词", pattern=r"^/jms\s+(?P<keyword>.+)$")
     async def cmd_search(self, stream_id: str = "", user_id: str = "", matched_groups: Optional[Dict[str, str]] = None, **kwargs: Any) -> Tuple[bool, str, bool]:
+        if not self.config.plugin.enabled:
+            return True, "", 1
+        user_id = user_id or self._resolve_user_id(kwargs)
         if not self._check_permission(user_id, self._resolve_group_id(stream_id, kwargs)):
             await self.ctx.send.text("你没有使用 JM 查询的权限。", stream_id)
-            return True, "", True
+            return True, "", 1
         keyword = str((matched_groups or {}).get("keyword") or "").strip()
         if not keyword:
             await self.ctx.send.text("用法：/jms 关键词", stream_id)
-            return True, "", True
+            return True, "", 1
         try:
             items = await self._run(self._search, keyword, self.config.query.max_results)
         except asyncio.TimeoutError:
             await self.ctx.send.text("搜索超时，请稍后再试。", stream_id)
-            return True, "", True
+            return True, "", 1
         except Exception as exc:  # noqa: BLE001
             await self.ctx.send.text(f"搜索失败：{exc}", stream_id)
-            return True, "", True
+            return True, "", 1
         await self.ctx.send.text(self._format_list(f"搜索「{keyword}」", items), stream_id)
-        return True, "", True
+        return True, "", 1
 
     @Command("jmrank", description="JM 周榜/月榜：/jmrank week 1", pattern=r"^/jmrank(?:\s+(?P<args>.*))?$")
     async def cmd_rank(self, stream_id: str = "", user_id: str = "", matched_groups: Optional[Dict[str, str]] = None, **kwargs: Any) -> Tuple[bool, str, bool]:
+        if not self.config.plugin.enabled:
+            return True, "", 1
+        user_id = user_id or self._resolve_user_id(kwargs)
         if not self._check_permission(user_id, self._resolve_group_id(stream_id, kwargs)):
             await self.ctx.send.text("你没有使用 JM 查询的权限。", stream_id)
-            return True, "", True
+            return True, "", 1
         raw = str((matched_groups or {}).get("args") or "").strip()
         kind = "week"
         page = 1
@@ -239,24 +265,27 @@ class JMMetaPlugin(MaiBotPlugin):
                 page = max(1, int(lower))
             else:
                 await self.ctx.send.text(f"未知参数：{token}\n用法：/jmrank [week|month] [页码]", stream_id)
-                return True, "", True
+                return True, "", 1
         try:
             items = await self._run(self._ranking, kind, page, self.config.query.max_results)
         except asyncio.TimeoutError:
             await self.ctx.send.text("获取榜单超时，请稍后再试。", stream_id)
-            return True, "", True
+            return True, "", 1
         except Exception as exc:  # noqa: BLE001
             await self.ctx.send.text(f"获取榜单失败：{exc}", stream_id)
-            return True, "", True
+            return True, "", 1
         title = f"JM {'周榜' if kind == 'week' else '月榜'} 第 {page} 页"
         await self.ctx.send.text(self._format_list(title, items), stream_id)
-        return True, "", True
+        return True, "", 1
 
     @Command("jmrec", description="JM 推荐：/jmrec [排序] [时间] [页码]", pattern=r"^/jmrec(?:\s+(?P<args>.*))?$")
     async def cmd_recommend(self, stream_id: str = "", user_id: str = "", matched_groups: Optional[Dict[str, str]] = None, **kwargs: Any) -> Tuple[bool, str, bool]:
+        if not self.config.plugin.enabled:
+            return True, "", 1
+        user_id = user_id or self._resolve_user_id(kwargs)
         if not self._check_permission(user_id, self._resolve_group_id(stream_id, kwargs)):
             await self.ctx.send.text("你没有使用 JM 查询的权限。", stream_id)
-            return True, "", True
+            return True, "", 1
         raw = str((matched_groups or {}).get("args") or "").strip()
         order_map = {"latest": "mr", "mr": "mr", "view": "mv", "mv": "mv",
                      "picture": "mp", "mp": "mp", "like": "tf", "tf": "tf",
@@ -279,19 +308,19 @@ class JMMetaPlugin(MaiBotPlugin):
                     f"未知参数：{token}\n用法：/jmrec [latest|view|picture|like|score] [all|today|week|month] [页码]",
                     stream_id,
                 )
-                return True, "", True
+                return True, "", 1
         try:
             items = await self._run(self._recommend, order_by, time_range, page, self.config.query.max_results)
         except asyncio.TimeoutError:
             await self.ctx.send.text("获取推荐超时，请稍后再试。", stream_id)
-            return True, "", True
+            return True, "", 1
         except Exception as exc:  # noqa: BLE001
             await self.ctx.send.text(f"获取推荐失败：{exc}", stream_id)
-            return True, "", True
+            return True, "", 1
         order_name = {"mr": "最新", "mv": "最多观看", "mp": "最多图片", "tf": "最多喜欢", "tr": "最高评分"}.get(order_by, order_by)
         time_name = {"a": "全部时间", "t": "今天", "w": "本周", "m": "本月"}.get(time_range, time_range)
         await self.ctx.send.text(self._format_list(f"JM 推荐 · {time_name} · {order_name} 第 {page} 页", items), stream_id)
-        return True, "", True
+        return True, "", 1
 
     @Command("jmhelp", description="JM 元数据插件帮助", pattern=r"^/jmhelp\s*$")
     async def cmd_help(self, stream_id: str = "", **kwargs: Any) -> Tuple[bool, str, bool]:
@@ -304,14 +333,13 @@ class JMMetaPlugin(MaiBotPlugin):
             "/jmhelp　本帮助",
             stream_id,
         )
-        return True, "", True
+        return True, "", 1
 
     # ------------------------------------------------------------------ LLM 工具
 
     @Tool(
         "jm_search_albums",
         description="搜索 JM 漫画元数据，返回编号与标题。仅查询，不下载任何内容。",
-        activation_type=ActivationType.ALWAYS,
         parameters={
             "type": "object",
             "properties": {"query": {"type": "string", "description": "搜索关键词"}},
