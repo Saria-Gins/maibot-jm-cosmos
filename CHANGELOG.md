@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.2
+
+- LLM 工具 `jm_search_albums` 补上权限校验：先判 `plugin.enabled`，再过 `_check_permission`（用户白名单 + 群聊开关 + 群白名单），默认私聊承诺不再从模型调用路径漏出
+- `scripts/fix_common_conflict.py` 扫描范围扩展到 `from common.xxx` 子包写法，避免"没有其他使用者"的结论偏乐观
+
 ## 2.0.1
 
 - 许可证统一为 AGPL-3.0-or-later，与仓库中的 AGPL-3.0 LICENSE 正文一致
