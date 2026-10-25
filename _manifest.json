@@ -1,6 +1,6 @@
 {
   "manifest_version": 2,
-  "version": "1.1.5",
+  "version": "1.1.6",
   "name": "JM-Cosmos for MaiBot",
   "description": "JM 漫画下载：搜索、查看详情、下载单行本并打包成 PDF 发送。由 AstrBot 版 astrbot_plugin_jm_cosmos 移植。",
   "author": {
@@ -9,9 +9,10 @@
   },
   "license": "GPL-v3.0-or-later",
   "urls": {
-    "repository": "https://github.com/GEMILUXVII/astrbot_plugin_jm_cosmos",
-    "homepage": "https://github.com/GEMILUXVII/astrbot_plugin_jm_cosmos",
-    "issues": "https://github.com/GEMILUXVII/astrbot_plugin_jm_cosmos/issues"
+    "repository": "https://github.com/Saria-Gins/maibot-jm-cosmos",
+    "homepage": "https://github.com/Saria-Gins/maibot-jm-cosmos",
+    "documentation": "https://github.com/Saria-Gins/maibot-jm-cosmos/blob/main/README.md",
+    "issues": "https://github.com/Saria-Gins/maibot-jm-cosmos/issues"
   },
   "host_application": {
     "min_version": "1.3.0",
@@ -44,6 +45,6 @@
       "zh-CN"
     ]
   },
-  "id": "gemiluxvii.jm-cosmos",
+  "id": "github.saria-gins.maibot-jm-cosmos",
   "plugin_type": "tool"
 }
