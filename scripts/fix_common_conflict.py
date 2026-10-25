@@ -49,7 +49,8 @@ def other_importers(sp: Path) -> list[Path]:
         except OSError:
             continue
         for line in text.splitlines():
-            if line.lstrip().startswith(("from common import", "import common")):
+            stripped = line.lstrip()
+            if stripped.startswith(("from common import", "from common.", "import common")):
                 hits.append(py)
                 break
     return hits
