@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.0
+
+- 内置查询桥接：新增 `scripts/jm_bridge.py`，jmcomic 在独立子进程运行，彻底绕开 `common` 与 `src/common` 的包名冲突；默认安装后即可查询，不需要改宿主 site-packages
+- 插件进程不再 `import jmcomic`
+- README 重写依赖说明，`fix_common_conflict.py` 降级为历史参考
+- 保留 fail-closed 会话判定与群聊默认关闭
+
+
 ## 2.0.5
 
 - 权限改为 fail-closed：新增 `_resolve_scope()` 判定 private / group / unknown，只有确认是私聊才放行，认不出来的会话一律拒绝并打 warning
